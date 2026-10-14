@@ -4,16 +4,19 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/kms/types"
 
 	awskmsemulator "github.com/blackwell-systems/aws-kms-emulator"
+	"github.com/blackwell-systems/aws-kms-emulator/kmstest"
 )
 
 // call posts a raw AWS JSON 1.1 request and returns the status, headers and body.
@@ -357,3 +360,23 @@ func TestNew_FromEnv(t *testing.T) {
 	}
 }
 
+func TestWithLogf_OneLinePerRequest(t *testing.T) {
+	var lines []string
+	srv := kmstest.NewServer(t, awskmsemulator.WithLogf(func(format string, args ...any) {
+		lines = append(lines, fmt.Sprintf(format, args...))
+	}))
+	c := srv.Client()
+	_, _ = c.DescribeKey(context.Background(), &kms.DescribeKeyInput{KeyId: aws.String("alias/none")})
+	_, _ = c.ListKeys(context.Background(), &kms.ListKeysInput{})
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "DescribeKey -> NotFoundException") || lines[1] != "ListKeys -> ok" {
+		t.Fatalf("log lines = %q", lines)
+	}
+}
+
+func TestKMSTest_ConfigBuildsAWorkingClient(t *testing.T) {
+	srv := kmstest.NewServer(t)
+	c := kms.NewFromConfig(srv.Config())
+	if _, err := c.CreateKey(context.Background(), &kms.CreateKeyInput{}); err != nil {
+		t.Fatalf("a client built from kmstest.Server.Config: %v", err)
+	}
+}

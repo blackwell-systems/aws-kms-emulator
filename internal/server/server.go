@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 
@@ -245,6 +244,3 @@ func newRequestID() string {
 	_, _ = rand.Read(b[:])
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
-
-// LogfStd is a Logf that writes to the standard logger.
-func LogfStd(format string, args ...any) { log.Printf(format, args...) }
