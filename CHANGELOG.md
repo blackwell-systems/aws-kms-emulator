@@ -28,4 +28,5 @@ First version: the KMS signing API, over the AWS JSON 1.1 protocol.
 - Standalone binary `cmd/server` (`AWS_KMS_PORT`, `AWS_KMS_LOG_LEVEL`, `AWS_KMS_REGION`, `AWS_KMS_ACCOUNT_ID`)
 - Optional on-disk persistence: set `AWS_KMS_DATA_DIR` and the emulator restores its state from `state.json` on startup and rewrites it after every change. The file holds plaintext private keys with mode `0600` and is meant for development keys only
 - Dockerfile (not published)
+- `crosscheck/` runs one set of SDK scenarios against any KMS endpoint (build tag `crosscheck`); `docs/AWS-BEHAVIOUR.md` records the comparison with Floci 2.2.0
 - docs: `docs/AWS-BEHAVIOUR.md` cites the AWS page behind each behaviour and lists what the documentation does not settle; `docs/FEATURES.md` lists supported and unsupported operations

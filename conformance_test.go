@@ -22,8 +22,9 @@ const (
 // TestConformance_KeyStateTable runs every operation in the key-state table
 // against a key in each state and compares with the table (docKeyStates).
 // Where the table lists two possible exceptions for a pending-deletion key
-// ("[2] or [3]"), the emulator returns DisabledException, the one AWS returns
-// in practice for the cryptographic operations.
+// ("[2] or [3]": DisabledException or KMSInvalidStateException), the emulator
+// returns KMSInvalidStateException; the table does not say which, and this is
+// the one the Floci emulator reports observing from AWS (see AWS-BEHAVIOUR.md).
 func TestConformance_KeyStateTable(t *testing.T) {
 	ctx := context.Background()
 	alg := types.SigningAlgorithmSpecEcdsaSha256
@@ -84,9 +85,9 @@ func TestConformance_KeyStateTable(t *testing.T) {
 
 	// "" means the operation succeeds in that state.
 	want := map[string][3]string{ // Enabled, Disabled, PendingDeletion
-		"Sign":                {"", "DisabledException", "DisabledException"},
-		"Verify":              {"", "DisabledException", "DisabledException"},
-		"GetPublicKey":        {"", "", "DisabledException"},
+		"Sign":                {"", "DisabledException", "KMSInvalidStateException"},
+		"Verify":              {"", "DisabledException", "KMSInvalidStateException"},
+		"GetPublicKey":        {"", "", "KMSInvalidStateException"},
 		"DescribeKey":         {"", "", ""},
 		"ListResourceTags":    {"", "", ""},
 		"TagResource":         {"", "", "KMSInvalidStateException"},

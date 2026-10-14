@@ -233,9 +233,6 @@ func checkSignFields(keyID string, message []byte, messageType, algorithm string
 	if messageType != "" && !storage.IsKnownMessageType(messageType) {
 		return validation("1 validation error detected: Value '%s' at 'messageType' failed to satisfy constraint: Member must satisfy enum value set", messageType)
 	}
-	if algorithm == "SM2DSA" || algorithm == "ML_DSA_SHAKE_256" {
-		return unsupported("SigningAlgorithm %s is not supported by aws-kms-emulator.", algorithm)
-	}
 	return nil
 }
 

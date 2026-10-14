@@ -314,7 +314,7 @@ func (s *Store) GetPublicKey(keyID string) (PublicKey, error) {
 	}
 	arn := s.KeyARN(k.id)
 	if k.state == StatePendingDeletion {
-		return PublicKey{}, newErr(CodeDisabled, "%s is pending deletion.", arn)
+		return PublicKey{}, newErr(CodeInvalidState, "%s is pending deletion.", arn)
 	}
 	if k.mat == nil {
 		return PublicKey{}, newErr(CodeUnsupportedOperation, "%s is a symmetric key; GetPublicKey requires an asymmetric KMS key.", arn)
@@ -363,7 +363,7 @@ func (s *Store) prepareSign(op string, p SignParams) (*key, string, SigningAlgor
 	case StateDisabled:
 		return nil, "", "", "", newErr(CodeDisabled, "%s is disabled.", arn)
 	case StatePendingDeletion:
-		return nil, "", "", "", newErr(CodeDisabled, "%s is pending deletion.", arn)
+		return nil, "", "", "", newErr(CodeInvalidState, "%s is pending deletion.", arn)
 	}
 	if k.usage != UsageSignVerify || k.mat == nil {
 		return nil, "", "", "", newErr(CodeInvalidKeyUsage, "%s key usage is %s which is not valid for %s.", arn, k.usage, op)

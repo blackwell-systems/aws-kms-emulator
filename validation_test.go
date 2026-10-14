@@ -102,7 +102,10 @@ func TestSign_ErrorTypes(t *testing.T) {
 		}, "InvalidKeyUsageException"},
 		{"SM2DSA", func(p, e, r string) *kms.SignInput {
 			return &kms.SignInput{KeyId: &p, Message: msg, SigningAlgorithm: types.SigningAlgorithmSpecSm2dsa}
-		}, "UnsupportedOperationException"},
+		}, "InvalidKeyUsageException"},
+		{"ML_DSA_SHAKE_256 on an ECC key", func(p, e, r string) *kms.SignInput {
+			return &kms.SignInput{KeyId: &p, Message: msg, SigningAlgorithm: types.SigningAlgorithmSpecMlDsaShake256}
+		}, "InvalidKeyUsageException"},
 		{"unknown key ID", func(p, e, r string) *kms.SignInput {
 			return &kms.SignInput{KeyId: aws.String("1234abcd-12ab-34cd-56ef-1234567890ab"), Message: msg, SigningAlgorithm: ecdsa256}
 		}, "NotFoundException"},
@@ -223,11 +226,11 @@ func TestKeyStateGatesCryptoOperations(t *testing.T) {
 		t.Fatalf("ScheduleKeyDeletion: %v", err)
 	}
 	_, err = c.Sign(ctx, signIn)
-	wantCode(t, err, "DisabledException")
+	wantCode(t, err, "KMSInvalidStateException")
 	_, err = c.Verify(ctx, verifyIn)
-	wantCode(t, err, "DisabledException")
+	wantCode(t, err, "KMSInvalidStateException")
 	_, err = c.GetPublicKey(ctx, &kms.GetPublicKeyInput{KeyId: key.KeyId})
-	wantCode(t, err, "DisabledException")
+	wantCode(t, err, "KMSInvalidStateException")
 
 	// Canceling the deletion leaves the key Disabled, not Enabled.
 	if _, err := c.CancelKeyDeletion(ctx, &kms.CancelKeyDeletionInput{KeyId: key.KeyId}); err != nil {

@@ -53,13 +53,14 @@ Common errors (Common errors page): `UnknownOperationException` is HTTP 404, `In
 | Verify does not need the same `MessageType` as Sign; a message and its digest are the same message | Verify | documented |
 | Disabled key: `DisabledException` | Key states, footnote [1] | documented |
 | Unknown key or alias: `NotFoundException` | Sign, errors | documented |
+| A valid `SigningAlgorithm` the key cannot use (including `SM2DSA` and `ML_DSA_SHAKE_256` on an ECC, Ed25519 or RSA key) is `InvalidKeyUsageException` | Sign, errors: "incompatible with the type of key material" | documented |
 | Malformed ARN: `InvalidArnException` | DescribeKey, errors | documented (the condition is "not valid") |
 | The response `KeyId` is the key ARN, also when the request used an alias | Sign: "The Amazon Resource Name (key ARN) of the asymmetric KMS key" | documented |
 
 Not settled by the documentation, so inferred:
 
 - The exception for a `MessageType` that an algorithm forbids (`ED25519_SHA_512` with DIGEST and the like) and for a DIGEST of the wrong length. The emulator returns `ValidationException`.
-- The exception for a key that is pending deletion. The key-state table lists, for Sign, Verify and GetPublicKey, "[2] or [3]": `DisabledException` or `KMSInvalidStateException`. The emulator returns `DisabledException`, with the message "... is pending deletion.".
+- The exception for a key that is pending deletion. The key-state table lists, for Sign, Verify and GetPublicKey, "[2] or [3]": `DisabledException` or `KMSInvalidStateException`, and does not say which applies. The emulator returns `KMSInvalidStateException` ("... is pending deletion."), which is what Floci reports observing from AWS ([floci-io/floci PR 2930](https://github.com/floci-io/floci/pull/2930)); that is second-hand evidence, and the table itself still allows either. See the Floci cross-check below.
 - The exact text of every error message. Codes and HTTP statuses follow the documentation; messages are written to be useful, and AWS's wording differs in places. Match on the code, not the message.
 - `EXTERNAL_MU` is documented for ML-DSA only. The emulator rejects it with `ValidationException`.
 - Check order: field shape first (`ValidationException`), then key lookup, key state, key usage, algorithm against key spec, and last the message type and length rules. AWS does not document the order.
@@ -116,3 +117,48 @@ Not settled: which of `InvalidAliasNameException` and `ValidationException` a na
 ## Not modelled
 
 The emulator is one account in one Region. It does not check IAM, key policies or grants (it stores no policy), it does not rate limit, and it has no eventual-consistency delay. `DryRun` is accepted and ignored. See [FEATURES.md](FEATURES.md).
+
+## Cross-check against Floci
+
+On 2026-10-14 the same SDK-level scenarios ran against this emulator and against [Floci](https://github.com/floci-io/floci) 2.2.0 (`floci/floci:2.2.0`, Docker, native image). The scenarios are `crosscheck/crosscheck_test.go` (build tag `crosscheck`); each records an outcome, either the error code or `ok` plus observable facts, and the two result sets were compared:
+
+```bash
+docker run -d -p 4566:4566 floci/floci:2.2.0
+KMS_ENDPOINT=http://localhost:4566 KMS_OUT=floci.json go test -tags crosscheck ./crosscheck   # Floci
+KMS_OUT=ours.json go test -tags crosscheck ./crosscheck                                      # this emulator
+```
+
+407 scenarios: key creation and description per spec; Sign and Verify for every key spec and algorithm with RAW, DIGEST and no message type, each signature checked with the standard library; cross-type and tampered Verify; digest lengths at size-1, size, size+1; message sizes 0, 1, 4096, 4097, 10000; Ed25519 message-type rules; key and alias lookup errors; aliases; `CreateKey` validation; the key-state matrix; lifecycle; paging; tags.
+
+**All 201 Sign scenarios agree**, and so do the Verify, digest-length, message-size, Ed25519 RAW / PH and tamper scenarios: the same accept / reject decisions, the same error codes, and signatures that verify externally on both. The differences are in key management and in how much validation each emulator does. The first run found two where this emulator was the one that differed from the documentation or from Floci; both are fixed (marked "fixed" below).
+
+Rows marked "ours" follow the cited AWS page; where neither matches a page, the row says the documentation does not settle it.
+
+| Scenario | This emulator | Floci 2.2.0 | Which matches AWS's docs |
+|----------|---------------|-------------|--------------------------|
+| `SM2DSA` or `ML_DSA_SHAKE_256` with an ECC key | `InvalidKeyUsageException` (fixed; was `UnsupportedOperationException`) | `InvalidKeyUsageException` | Floci was right, now both. Sign: an algorithm incompatible with the key's material is `InvalidKeyUsageException` |
+| Sign, Verify, GetPublicKey on a key pending deletion | `KMSInvalidStateException` (changed; was `DisabledException`) | `KMSInvalidStateException` | Neither is settled: the table says "[2] or [3]". Switched to match Floci's report of observed AWS behaviour |
+| `CancelKeyDeletion`, key not pending | `KMSInvalidStateException` | succeeds | Ours: key-state table footnote [4] |
+| `CancelKeyDeletion`, resulting state | `Disabled` | `Enabled` | Ours: CancelKeyDeletion, "the key state of the KMS key is Disabled" |
+| `ScheduleKeyDeletion` response | `KeyState`, `PendingWindowInDays` set | both missing | Ours: both are in the response syntax |
+| `ScheduleKeyDeletion` default window | 30 | no value returned | Ours: "defaults to 30" |
+| `PendingWindowInDays` 0, 6, 31 | `ValidationException` | accepted | Ours: "between 7 and 30" |
+| `DescribeKey` of a pending key | `Enabled: false`, window reported | `Enabled: true`, no window | Ours: a key pending deletion cannot be used; `PendingDeletionWindowInDays` is in KeyMetadata |
+| `CreateAlias` with an existing name | `AlreadyExistsException` | succeeds | Ours: CreateAlias errors |
+| Alias names with a space, a dot, `alias/` alone, or over 256 characters | rejected | accepted (`alias/` and 251-character names are stored) | Ours: pattern `^alias/[a-zA-Z0-9/_-]+$`, 1 to 256 characters |
+| Empty alias name | `ValidationException` | `InvalidAliasNameException` | Not settled |
+| Alias as `TargetKeyId` | `NotFoundException` | accepted | Ours: "Specify the key ID or key ARN" |
+| `ListAliases` | only aliases created here | also predefined `alias/aws/...` aliases | Not a defect either way: the AWS page says responses can include AWS-managed aliases; this emulator has none |
+| `ListAliases` / `ListKeys` `Limit` 0, 101 / 1001, bad `Marker` | `ValidationException`, `InvalidMarkerException` | accepted; `Limit` ignored (`ListKeys` with `Limit` 1 returned all keys) | Ours: ListKeys, ListAliases request parameters |
+| Malformed ARN (`arn:aws:kms:us-east-1`, an S3 ARN) | `InvalidArnException` | `NotFoundException` | Ours: `InvalidArnException`, "a specified ARN ... is not valid" |
+| `KeyId` of 2049 characters | `ValidationException` | `NotFoundException` | Ours: maximum length 2048 |
+| `DisableKey` with an alias | `NotFoundException` | `InvalidArnException` | Not settled: the page says key ID or key ARN |
+| `CreateKey` description of 8193 characters | `ValidationException` | accepted | Ours: maximum 8192 |
+| `CreateKey` tags with an `aws:` key, or duplicate keys | `TagException` | accepted | Both rules are inferred: the pages say a key cannot carry two tags with one tag key and that invalid tags are `TagException`, and the `aws:` prefix rule comes from AWS's general tagging rules |
+| `TagResource` empty key, 129-character key, 257-character value, 51st tag | `ValidationException` / `LimitExceededException` | all accepted | Ours: Tag page (1 to 128, 0 to 256); the 50-tag limit is inferred |
+| `CreateKey` for `HMAC_256`, `ML_DSA_65`, RSA `ENCRYPT_DECRYPT`, `MultiRegion` | `UnsupportedOperationException` | creates the key | Scope, not a defect: Floci implements more of KMS |
+| `RSA_2048` `SigningAlgorithms` order | PSS first | PKCS #1 v1.5 first | The Key spec reference table lists PSS first; AWS's actual response order is not documented |
+
+One scenario differs only because the emulators use different account IDs: an alias target ARN for account `000000000000` is `NotFoundException` here (account `111122223333` by default) and accepted by Floci.
+
+What this does not show: either emulator's agreement with the live service. Two emulators agreeing on a behaviour is not evidence about AWS, and Floci's only authority here is its own report of what it observed in ap-northeast-1. The rows above rest on the cited AWS pages.
